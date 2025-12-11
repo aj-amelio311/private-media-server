@@ -1,0 +1,27 @@
+# Node modules
+node_modules/
+client/node_modules/
+
+# Build output
+client/build/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Database and data
+*.db
+data/
+
+# Environment variables
+.env
+
+# Misc
+*.swp
+*.swo
+
+# VSCode
+.vscode/

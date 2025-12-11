@@ -1,0 +1,365 @@
+const fs = require('fs');
+const path = require('path');
+const initSqlJs = require('sql.js');
+const { TMDB_GENRES } = require('./genremap');
+
+const DB_PATH = path.join(__dirname, '../data/movies.db');
+
+let db = null;
+
+async function initDatabase() {
+  const SQL = await initSqlJs();
+  
+  // Load existing database or create new one
+  if (fs.existsSync(DB_PATH)) {
+    const buffer = fs.readFileSync(DB_PATH);
+    db = new SQL.Database(buffer);
+    console.log('[Database] Loaded existing database');
+    
+    // Check if cast column exists, if not add it
+    try {
+      const result = db.exec("PRAGMA table_info(movies)");
+      const columns = result[0]?.values.map(row => row[1]) || [];
+      
+      if (!columns.includes('cast')) {
+        console.log('[Database] Adding cast column to existing table');
+        db.run("ALTER TABLE movies ADD COLUMN cast TEXT");
+        saveDatabase();
+        console.log('[Database] Cast column added');
+      }
+      
+      if (!columns.includes('upload_attempts')) {
+        console.log('[Database] Adding upload_attempts column to existing table');
+        db.run("ALTER TABLE movies ADD COLUMN upload_attempts INTEGER DEFAULT 0");
+        saveDatabase();
+        console.log('[Database] Upload attempts column added');
+      }
+      
+      if (!columns.includes('director')) {
+        console.log('[Database] Adding director column to existing table');
+        db.run("ALTER TABLE movies ADD COLUMN director TEXT");
+        saveDatabase();
+        console.log('[Database] Director column added');
+      }
+      
+      // Create indexes for better query performance
+      console.log('[Database] Creating indexes for performance...');
+      db.run("CREATE INDEX IF NOT EXISTS idx_title ON movies(title)");
+      db.run("CREATE INDEX IF NOT EXISTS idx_in_queue ON movies(in_queue)");
+      db.run("CREATE INDEX IF NOT EXISTS idx_created_at ON movies(created_at)");
+      saveDatabase();
+      console.log('[Database] Indexes created');
+    } catch (err) {
+      console.error('[Database] Error checking/adding columns:', err);
+    }
+  } else {
+    db = new SQL.Database();
+    console.log('[Database] Created new database');
+    
+    // Create movies table
+    db.run(`
+      CREATE TABLE IF NOT EXISTS movies (
+        id INTEGER PRIMARY KEY,
+        title TEXT NOT NULL UNIQUE,
+        original_title TEXT,
+        original_language TEXT,
+        overview TEXT,
+        poster_path TEXT,
+        release_date TEXT,
+        vote_average REAL,
+        vote_count INTEGER,
+        popularity REAL,
+        genre_ids TEXT,
+        cast TEXT,
+        director TEXT,
+        upload_attempts INTEGER DEFAULT 0,
+        in_queue BOOLEAN DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    
+    saveDatabase();
+    console.log('[Database] Movies table created');
+  }
+  
+  return db;
+}
+
+function saveDatabase() {
+  if (!db) return;
+  const data = db.export();
+  const buffer = Buffer.from(data);
+  fs.writeFileSync(DB_PATH, buffer);
+}
+
+function getDatabase() {
+  if (!db) {
+    throw new Error('Database not initialized. Call initDatabase() first.');
+  }
+  return db;
+}
+
+async function insertMovie(movieData) {
+  return queueWrite(() => {
+    const db = getDatabase();
+    
+    // Convert genre IDs to genre names
+    const genreNames = (movieData.genre_ids || [])
+      .map(id => TMDB_GENRES[id])
+      .filter(Boolean); // Remove any undefined values
+    
+    const stmt = db.prepare(`
+      INSERT OR REPLACE INTO movies 
+      (id, title, original_title, original_language, overview, poster_path, 
+       release_date, vote_average, vote_count, popularity, genre_ids, cast, director, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    `);
+    
+    stmt.run([
+      movieData.id,
+      movieData.title,
+      movieData.original_title,
+      movieData.original_language,
+      movieData.overview,
+      movieData.poster_path,
+      movieData.release_date,
+      movieData.vote_average,
+      movieData.vote_count,
+      movieData.popularity,
+      JSON.stringify(genreNames),
+      JSON.stringify(movieData.cast || []),
+      movieData.director || null
+    ]);
+    
+    stmt.free();
+    saveDatabase();
+    
+    console.log(`[Database] Inserted/Updated movie: ${movieData.title}`);
+    return true;
+  });
+}
+
+function getMovieByTitle(title) {
+function insertMovie(movieData) {
+  const db = getDatabase();
+  
+  // Convert genre IDs to genre names
+  const genreNames = (movieData.genre_ids || [])
+    .map(id => TMDB_GENRES[id])
+    .filter(Boolean); // Remove any undefined values
+  
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO movies 
+    (id, title, original_title, original_language, overview, poster_path, 
+     release_date, vote_average, vote_count, popularity, genre_ids, cast, director, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+  `);
+  
+  stmt.run([
+    movieData.id,
+    movieData.title,
+    movieData.original_title,
+    movieData.original_language,
+    movieData.overview,
+    movieData.poster_path,
+    movieData.release_date,
+    movieData.vote_average,
+    movieData.vote_count,
+    movieData.popularity,
+    JSON.stringify(genreNames),
+    JSON.stringify(movieData.cast || []),
+    movieData.director || null
+  ]);
+  
+  stmt.free();
+  saveDatabase();
+  
+  console.log(`[Database] Inserted/Updated movie: ${movieData.title}`);
+}     while (stmt.step()) {
+        const row = stmt.getAsObject();
+        const title = (row.title || '').toLowerCase();
+        const director = (row.director || '').toLowerCase();
+        const overview = (row.overview || '').toLowerCase();
+        const cast = (row.cast || '').toLowerCase();
+        
+        if (title.indexOf(searchLower) !== -1 || 
+            director.indexOf(searchLower) !== -1 || 
+            overview.indexOf(searchLower) !== -1 ||
+            cast.indexOf(searchLower) !== -1) {
+          allResults.push({
+            ...row,
+            genre_ids: JSON.parse(row.genre_ids || '[]')
+          });
+        }
+      }
+      
+      stmt.free();
+      
+      console.log('[Database] Search found', allResults.length, 'total results');
+      
+      // Apply pagination to search results
+      const offset = (page - 1) * limit;
+      const paginatedResults = allResults.slice(offset, offset + limit);
+      const hasMore = allResults.length > (page * limit);
+      
+      console.log('[Database] Returning page', page, 'with', paginatedResults.length, 'results, hasMore:', hasMore);
+      
+      return {
+        movies: paginatedResults,
+        total: allResults.length,
+        page: page,
+        limit: limit,
+        hasMore: hasMore
+      };
+    } catch (err) {
+      console.error('[Database] Error searching movies:', err.message);
+      return {
+        movies: [],
+        total: 0,
+        page: 1,
+        limit: 50,
+        hasMore: false
+      };
+    }
+  }
+  
+  // Regular paginated query for browsing (no search)
+  try {
+    let query = 'SELECT title, poster_path, genre_ids, id, release_date, in_queue, director, overview, "cast", upload_attempts FROM movies';
+    let params = [];
+    
+    if (genre && genre !== 'All' && genre !== 'All Genres') {
+      query += ' WHERE genre_ids LIKE ?';
+      params.push('%' + genre + '%');
+    }
+    
+    query += ' ORDER BY title LIMIT ? OFFSET ?';
+    params.push(limit, offset);
+    
+    console.log('[Database] Browse query:', query);
+    console.log('[Database] Browse params:', params);
+    
+    const stmt = db.prepare(query);
+    stmt.bind(params);
+    
+    while (stmt.step()) {
+      const row = stmt.getAsObject();
+      results.push({
+        ...row,
+        genre_ids: JSON.parse(row.genre_ids || '[]')
+      });
+    }
+    
+    stmt.free();
+    
+    // Get total count
+    let countQuery = 'SELECT COUNT(*) as total FROM movies';
+    let countParams = [];
+    
+    if (genre && genre !== 'All' && genre !== 'All Genres') {
+      countQuery += ' WHERE genre_ids LIKE ?';
+      countParams.push('%' + genre + '%');
+    }
+    
+    const countStmt = db.prepare(countQuery);
+    if (countParams.length > 0) {
+      countStmt.bind(countParams);
+    }
+    
+    let total = 0;
+    if (countStmt.step()) {
+      total = countStmt.getAsObject().total;
+    }
+    countStmt.free();
+    
+    return {
+      movies: results,
+      total,
+      page,
+      limit,
+      hasMore: offset + results.length < total
+    };
+  } catch (err) {
+    console.error('[Database] Error fetching movies:', err.message);
+    return {
+      movies: [],
+      total: 0,
+      page: 1,
+      limit: 50,
+      hasMore: false
+    };
+  }
+}
+
+function updateMovieQueue(title, inQueue) {
+  const db = getDatabase();
+  
+  const stmt = db.prepare('UPDATE movies SET in_queue = ?, updated_at = CURRENT_TIMESTAMP WHERE title = ?');
+  stmt.run([inQueue ? 1 : 0, title]);
+  stmt.free();
+  saveDatabase();
+  
+  console.log(`[Database] Updated queue status for ${title}: ${inQueue}`);
+}
+
+function getQueueMovies() {
+  const db = getDatabase();
+  
+  const results = [];
+  const stmt = db.prepare('SELECT * FROM movies WHERE in_queue = 1 ORDER BY title');
+  
+  while (stmt.step()) {
+    const row = stmt.getAsObject();
+    results.push({
+      ...row,
+      genre_ids: JSON.parse(row.genre_ids || '[]'),
+      cast: JSON.parse(row.cast || '[]')
+    });
+  }
+  
+  stmt.free();
+  return results;
+}
+
+function getUploadCount(title) {
+  const db = getDatabase();
+  
+  // Get the upload_attempts count for this title
+  const stmt = db.prepare('SELECT upload_attempts FROM movies WHERE title = ?');
+  stmt.bind([title]);
+  
+  let attempts = 0;
+  if (stmt.step()) {
+    const row = stmt.getAsObject();
+    attempts = row.upload_attempts || 0;
+  }
+  
+  stmt.free();
+  return attempts;
+}
+
+async function incrementUploadAttempts(title) {
+  return queueWrite(() => {
+    const db = getDatabase();
+function incrementUploadAttempts(title) {
+  const db = getDatabase();
+  
+  // Increment the upload attempts counter
+  const stmt = db.prepare('UPDATE movies SET upload_attempts = upload_attempts + 1, updated_at = CURRENT_TIMESTAMP WHERE title = ?');
+  stmt.run([title]);
+  stmt.free();
+  saveDatabase();
+  
+  console.log(`[Database] Incremented upload attempts for: ${title}`);
+} initDatabase,
+  getDatabase,
+  saveDatabase,
+  insertMovie,
+  getMovieByTitle,
+  getAllMovies,
+  updateMovieQueue,
+  getQueueMovies,
+  getUploadCount,
+  incrementUploadAttempts
+};

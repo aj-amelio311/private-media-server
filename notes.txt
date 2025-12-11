@@ -1,0 +1,66 @@
+              ┌──────────────────────────────┐
+              │ DigitalOcean Database (SQL)   │
+              │  - movies table               │
+              │  - users table                │
+              │  - progress / watch history   │
+              └───────────────┬──────────────┘
+                              |
+                              |
+   ┌──────────────────────────┴──────────────────────────┐
+   │              Your Node.js Backend                   │
+   │  - /movies           → returns metadata             │
+   │  - /play/:id         → returns HLS playlist URL     │
+   │  - /auth/login       → Firestick + Web login        │
+   │  - CORS + JWT auth                                 │
+   └───────────────┬───────────────────────────┘
+                   |
+                   |
+     ┌─────────────┴────────────────┐
+     │                               │
+┌────▼─────┐                  ┌──────▼─────┐
+│ React Web │                  │ Firestick  │
+│  App      │                  │  App       │
+│ (browser) │                  │ (WebView + │
+│           │                  │  your URL) │
+└────▲─────┘                  └──────▲─────┘
+     │                               │
+     └───────────────────────────────┘
+                       |
+                       |
+              ┌────────▼─────────┐
+              │ DO Spaces (S3)   │
+              │  /movieA_hls/... │
+              │  /movieB_hls/... │
+              │   public URLs    │
+              └──────────────────┘
+
+
+
+
+      Netlify (Free)
+   ┌───────────────────┐
+   │  React Frontend   │
+   └───────────▲───────┘
+               │
+               │ fetch(movie data)
+               │
+      Fly.io Backend (Free)
+   ┌────────────────────────┐
+   │ Node.js + Express API  │
+   │ /movies                │
+   │ /play/:id              │
+   │ /auth                  │
+   │ uses Fly Postgres      │
+   └───────────▲────────────┘
+               │ returns HLS URL
+               │ (from B2+Cloudflare)
+               │
+   ┌───────────┴──────────────────────┐
+   │     Cloudflare CDN (Free)        │
+   │  caches all playlist + .ts files │
+   └───────────▲──────────────────────┘
+               │ origin fetch
+   ┌───────────┴──────────────────────┐
+   │ Backblaze B2 Storage ($7.50/mo)  │
+   │ 1500 HLS folders                 │
+   └──────────────────────────────────┘
