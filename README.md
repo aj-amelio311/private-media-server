@@ -54,14 +54,14 @@ Option A — Production build + static server (recommended for testing on Fire T
 npm run build
 # install serve if you don't have it:
 npm install -g serve
-# serve the build on port 3000
-serve -s build -l 3000
+# serve the build on port 8080
+serve -s build -l 8080
 ```
 
 Then open on Firestick's browser:
 
 ```
-http://<YOUR_MACHINE_IP>:3000
+http://<YOUR_MACHINE_IP>:8080
 ```
 
 Option B — React dev server with hot reload (not recommended for performance testing)
@@ -77,7 +77,7 @@ npm start
 Then open:
 
 ```
-http://<YOUR_MACHINE_IP>:3000
+http://<YOUR_MACHINE_IP>:8080
 ```
 
 Backend requirements
@@ -166,8 +166,8 @@ Quick commands summary
 # in client/
 npm run build
 npm install -g serve
-serve -s build -l 3000
-# then open http://<YOUR_IP>:3000 on the Firestick browser
+serve -s build -l 8080
+# then open http://<YOUR_IP>:8080 on the Firestick browser
 ```
 - Run dev server and bind to 0.0.0.0:
 ```bash

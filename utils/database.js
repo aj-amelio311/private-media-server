@@ -1,3 +1,12 @@
+// Clears all embedding vectors from the movies table, but keeps the column
+function clearAllEmbeddings() {
+  const db = getDatabase();
+  const stmt = db.prepare('UPDATE movies SET embedding = NULL');
+  stmt.run();
+  stmt.free();
+  saveDatabase();
+  console.log('[Database] All movie embeddings cleared.');
+}
 // Returns a random movie from the database
 function getRandomMovie() {
   const db = getDatabase();
@@ -35,85 +44,120 @@ function getAllMovies({ page = 1, limit = 50, search = '', genre = 'All', decade
   let results = [];
   let offset = (page - 1) * limit;
   try {
-    // If searching, use LIKE on title and overview
+    // If searching, prioritize exact title match, then partial title, then other fields
     if (search && search.trim()) {
-      let query = `SELECT title, poster_path, genre_ids, id, release_date, in_queue, director, overview, "cast", upload_attempts, mpaa, keywords FROM movies WHERE (
-        title LIKE ? OR
-        overview LIKE ? OR
-        director LIKE ? OR
-        "cast" LIKE ? OR
-        keywords LIKE ?
-      )`;
-      let params = [
-        `%${search}%`,
-        `%${search}%`,
-        `%${search}%`,
-        `%${search}%`,
-        `%${search}%`
-      ];
+      let allResults = [];
+      let seenIds = new Set();
+
+      // 1. Exact title match (case-insensitive)
+      let query1 = `SELECT title, poster_path, genre_ids, id, release_date, in_queue, director, overview, "cast", upload_attempts, mpaa, keywords FROM movies WHERE LOWER(title) = LOWER(?)`;
+      let params1 = [search.trim()];
       if (genre && genre !== 'All' && genre !== 'All Genres') {
-        query += ' AND genre_ids LIKE ?';
-        params.push(`%${genre}%`);
+        query1 += ' AND genre_ids LIKE ?';
+        params1.push(`%${genre}%`);
       }
       if (decade && decade !== 'All Decades') {
-        // Decade format: '1980s' => 1980-1989
         const startYear = parseInt(decade.slice(0, 4));
         const endYear = startYear + 9;
-        query += ' AND release_date >= ? AND release_date <= ?';
-        params.push(`${startYear}-01-01`, `${endYear}-12-31`);
+        query1 += ' AND release_date >= ? AND release_date <= ?';
+        params1.push(`${startYear}-01-01`, `${endYear}-12-31`);
       }
-      query += ' ORDER BY title LIMIT ? OFFSET ?';
-      params.push(limit, offset);
-      const stmt = db.prepare(query);
-      stmt.bind(params);
-      while (stmt.step()) {
-        const row = stmt.getAsObject();
-        results.push({
+      const stmt1 = db.prepare(query1);
+      stmt1.bind(params1);
+      while (stmt1.step()) {
+        const row = stmt1.getAsObject();
+        allResults.push({
           ...row,
           genre_ids: JSON.parse(row.genre_ids || '[]'),
           cast: JSON.parse(row.cast || '[]'),
           keywords: row.keywords ? JSON.parse(row.keywords) : []
         });
+        seenIds.add(row.id);
       }
-      stmt.free();
-      // Get total count
-      let countQuery = `SELECT COUNT(*) as total FROM movies WHERE (
-        title LIKE ? OR
+      stmt1.free();
+
+      // 2. Partial title match (contains, case-insensitive, not exact)
+      let query2 = `SELECT title, poster_path, genre_ids, id, release_date, in_queue, director, overview, "cast", upload_attempts, mpaa, keywords FROM movies WHERE LOWER(title) LIKE LOWER(?) AND LOWER(title) != LOWER(?)`;
+      let params2 = [`%${search.trim()}%`, search.trim()];
+      if (genre && genre !== 'All' && genre !== 'All Genres') {
+        query2 += ' AND genre_ids LIKE ?';
+        params2.push(`%${genre}%`);
+      }
+      if (decade && decade !== 'All Decades') {
+        const startYear = parseInt(decade.slice(0, 4));
+        const endYear = startYear + 9;
+        query2 += ' AND release_date >= ? AND release_date <= ?';
+        params2.push(`${startYear}-01-01`, `${endYear}-12-31`);
+      }
+      query2 += ' ORDER BY title';
+      const stmt2 = db.prepare(query2);
+      stmt2.bind(params2);
+      while (stmt2.step()) {
+        const row = stmt2.getAsObject();
+        if (!seenIds.has(row.id)) {
+          allResults.push({
+            ...row,
+            genre_ids: JSON.parse(row.genre_ids || '[]'),
+            cast: JSON.parse(row.cast || '[]'),
+            keywords: row.keywords ? JSON.parse(row.keywords) : []
+          });
+          seenIds.add(row.id);
+        }
+      }
+      stmt2.free();
+
+      // 3. Other fields (overview, director, cast, keywords), not already included
+      let query3 = `SELECT title, poster_path, genre_ids, id, release_date, in_queue, director, overview, "cast", upload_attempts, mpaa, keywords FROM movies WHERE (
         overview LIKE ? OR
         director LIKE ? OR
         "cast" LIKE ? OR
         keywords LIKE ?
       )`;
-      let countParams = [
-        `%${search}%`,
+      let params3 = [
         `%${search}%`,
         `%${search}%`,
         `%${search}%`,
         `%${search}%`
       ];
       if (genre && genre !== 'All' && genre !== 'All Genres') {
-        countQuery += ' AND genre_ids LIKE ?';
-        countParams.push(`%${genre}%`);
+        query3 += ' AND genre_ids LIKE ?';
+        params3.push(`%${genre}%`);
       }
       if (decade && decade !== 'All Decades') {
         const startYear = parseInt(decade.slice(0, 4));
         const endYear = startYear + 9;
-        countQuery += ' AND release_date >= ? AND release_date <= ?';
-        countParams.push(`${startYear}-01-01`, `${endYear}-12-31`);
+        query3 += ' AND release_date >= ? AND release_date <= ?';
+        params3.push(`${startYear}-01-01`, `${endYear}-12-31`);
       }
-      const countStmt = db.prepare(countQuery);
-      countStmt.bind(countParams);
-      let total = 0;
-      if (countStmt.step()) {
-        total = countStmt.getAsObject().total;
+      query3 += ' ORDER BY title';
+      const stmt3 = db.prepare(query3);
+      stmt3.bind(params3);
+      while (stmt3.step()) {
+        const row = stmt3.getAsObject();
+        if (!seenIds.has(row.id)) {
+          allResults.push({
+            ...row,
+            genre_ids: JSON.parse(row.genre_ids || '[]'),
+            cast: JSON.parse(row.cast || '[]'),
+            keywords: row.keywords ? JSON.parse(row.keywords) : []
+          });
+          seenIds.add(row.id);
+        }
       }
-      countStmt.free();
+      stmt3.free();
+
+      // Pagination
+      const pagedResults = allResults.slice(offset, offset + limit);
+
+      // Get total count (matches all three queries)
+      let count = allResults.length;
+
       return {
-        movies: results,
-        total,
+        movies: pagedResults,
+        total: count,
         page,
         limit,
-        hasMore: offset + results.length < total
+        hasMore: offset + pagedResults.length < count
       };
     }
     // Regular paginated query for browsing (no search)
@@ -133,7 +177,12 @@ function getAllMovies({ page = 1, limit = 50, search = '', genre = 'All', decade
     if (whereClauses.length > 0) {
       query += ' WHERE ' + whereClauses.join(' AND ');
     }
-    query += ' ORDER BY title LIMIT ? OFFSET ?';
+    query += ` ORDER BY LOWER(
+      CASE
+        WHEN LOWER(title) LIKE 'the %' THEN SUBSTR(title, 5)
+        ELSE title
+      END
+    ) LIMIT ? OFFSET ?`;
     params.push(limit, offset);
     const stmt = db.prepare(query);
     stmt.bind(params);
@@ -242,6 +291,22 @@ async function initDatabase() {
         console.log('[Database] Embedding column added');
       }
       
+      if (!columns.includes("tagline")) {
+        db.run("ALTER TABLE movies ADD COLUMN tagline TEXT");
+      }
+      if (!columns.includes("belongs_to_collection")) {
+        db.run("ALTER TABLE movies ADD COLUMN belongs_to_collection TEXT");
+      }
+      if (!columns.includes("production_companies")) {
+        db.run("ALTER TABLE movies ADD COLUMN production_companies TEXT");
+      }
+      if (!columns.includes("production_countries")) {
+        db.run("ALTER TABLE movies ADD COLUMN production_countries TEXT");
+      }
+      if (!columns.includes("spoken_languages")) {
+        db.run("ALTER TABLE movies ADD COLUMN spoken_languages TEXT");
+      }
+      
       // Create indexes for better query performance
       console.log('[Database] Creating indexes for performance...');
       db.run("CREATE INDEX IF NOT EXISTS idx_title ON movies(title)");
@@ -276,6 +341,12 @@ async function initDatabase() {
         upload_attempts INTEGER DEFAULT 0,
         in_queue BOOLEAN DEFAULT 0,
         embedding TEXT,
+        keywords TEXT,
+        tagline TEXT,
+        belongs_to_collection TEXT,
+        production_companies TEXT,
+        production_countries TEXT,
+        spoken_languages TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
@@ -307,8 +378,36 @@ function getDatabase() {
   return db;
 }
 
+// Check if a GUID (id) already exists in the database
+function doesIdExist(id) {
+  const db = getDatabase();
+  const stmt = db.prepare('SELECT id FROM movies WHERE id = ?');
+  stmt.bind([id]);
+  const exists = stmt.step();
+  stmt.free();
+  return exists;
+}
+
+// Generate a unique GUID that doesn't exist in the database
+function generateUniqueId() {
+  let newId;
+  do {
+    newId = Math.floor(Math.random() * 10000000);
+  } while (doesIdExist(newId));
+  return newId;
+}
+
 async function insertMovie(movieData) {
   const db = getDatabase();
+  
+  // Check for GUID collision and generate a new one if needed
+  let finalId = movieData.id;
+  if (doesIdExist(finalId)) {
+    console.log(`[Database] GUID collision detected for id ${finalId}. Generating new unique GUID...`);
+    finalId = generateUniqueId();
+    console.log(`[Database] Using new GUID ${finalId} for movie: ${movieData.title}`);
+  }
+  
   // Convert genre IDs to genre names
   const genreNames = (movieData.genre_ids || [])
     .map(id => TMDB_GENRES[id])
@@ -319,8 +418,8 @@ async function insertMovie(movieData) {
   const stmt = db.prepare(`
     INSERT INTO movies 
     (id, title, original_title, original_language, overview, poster_path, 
-     release_date, vote_average, vote_count, popularity, genre_ids, cast, director, mpaa, updated_at, upload_attempts)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, COALESCE((SELECT upload_attempts FROM movies WHERE title = ?), 0))
+     release_date, vote_average, vote_count, popularity, genre_ids, cast, director, mpaa, upload_attempts, in_queue, embedding, keywords, tagline, belongs_to_collection, production_companies, production_countries, spoken_languages, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(title) DO UPDATE SET
       original_title = excluded.original_title,
       original_language = excluded.original_language,
@@ -334,11 +433,20 @@ async function insertMovie(movieData) {
       cast = excluded.cast,
       director = excluded.director,
       mpaa = excluded.mpaa,
-      updated_at = CURRENT_TIMESTAMP,
-      upload_attempts = movies.upload_attempts
+      upload_attempts = excluded.upload_attempts,
+      in_queue = excluded.in_queue,
+      embedding = excluded.embedding,
+      keywords = excluded.keywords,
+      tagline = excluded.tagline,
+      belongs_to_collection = excluded.belongs_to_collection,
+      production_companies = excluded.production_companies,
+      production_countries = excluded.production_countries,
+      spoken_languages = excluded.spoken_languages,
+      created_at = excluded.created_at,
+      updated_at = excluded.updated_at
   `);
   stmt.run([
-    movieData.id,
+    finalId,
     movieData.title,
     movieData.original_title,
     movieData.original_language,
@@ -352,7 +460,17 @@ async function insertMovie(movieData) {
     JSON.stringify(movieData.cast || []),
     movieData.director || null,
     movieData.mpaa || null,
-    movieData.title // for COALESCE upload_attempts
+    movieData.upload_attempts ?? 0,
+    movieData.in_queue ?? 0,
+    movieData.embedding ?? null,
+    JSON.stringify(movieData.keywords || []),
+    movieData.tagline || null,
+    movieData.belongs_to_collection ? JSON.stringify(movieData.belongs_to_collection) : null,
+    movieData.production_companies ? JSON.stringify(movieData.production_companies) : null,
+    movieData.production_countries ? JSON.stringify(movieData.production_countries) : null,
+    movieData.spoken_languages ? JSON.stringify(movieData.spoken_languages) : null,
+    movieData.created_at || new Date().toISOString(),
+    movieData.updated_at || new Date().toISOString()
   ]);
   stmt.free();
   saveDatabase();
@@ -383,7 +501,12 @@ function getQueueMovies() {
   const db = getDatabase();
   
   const results = [];
-  const stmt = db.prepare('SELECT * FROM movies WHERE in_queue = 1 ORDER BY title');
+  const stmt = db.prepare(`SELECT * FROM movies WHERE in_queue = 1 ORDER BY LOWER(
+    CASE
+      WHEN LOWER(title) LIKE 'the %' THEN SUBSTR(title, 5)
+      ELSE title
+    END
+  )`);
   
   while (stmt.step()) {
     const row = stmt.getAsObject();
@@ -455,4 +578,5 @@ module.exports = {
   getUploadCount,
   incrementUploadAttempts,
   getRandomMovie
+  ,clearAllEmbeddings
 };

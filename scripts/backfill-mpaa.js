@@ -1,5 +1,5 @@
 require('dotenv').config();
-const fetch = require('node-fetch');
+const fetch = (...args) => import('node-fetch').then(mod => mod.default(...args));
 const { initDatabase, getDatabase, saveDatabase } = require('../utils/database');
 const TMDB_API_KEY = process.env.TMDB_API_KEY;
 

@@ -11,10 +11,17 @@ const deleteMovieRouter = require("./endpoints/DeleteMovie");
 const path = require("path");
 const cors = require("cors");
 const uploadMovieRouter = require("./endpoints/UploadMovie");
+
+// ...existing code...
+
+// --- BEGIN: SSE progress endpoint (unauthenticated) ---
+// (moved below, after app is declared)
+// --- END: SSE progress endpoint ---
 const getAllTitlesRouter = require("./endpoints/GetAllTitles");
 const rouletteRouter = require("./endpoints/Roulette");
 const smartSearchRouter = require("./endpoints/SmartSearch");
 const { initDatabase } = require("./utils/database");
+const authMiddleware = require("./utils/authMiddleware");
 
 const app = express();
 const PORT = 8080;
@@ -28,7 +35,7 @@ app.use(express.urlencoded({ limit: '10gb', extended: true }));
 
 // Dynamic CORS: allow localhost:3000 plus any origin in env ALLOWED_ORIGINS (comma-separated).
 const allowedFromEnv = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim()) : [];
-const defaultAllowed = ["http://localhost:3000", "http://127.0.0.1:3000", "http://192.168.88.4:3000"];
+const defaultAllowed = ["http://localhost:8080", "http://127.0.0.1:8080", "http://192.168.88.4:8080"];
 const allowList = [...new Set([...defaultAllowed, ...allowedFromEnv])];
 
 app.use(cors({
@@ -44,6 +51,30 @@ app.use(cors({
 // Explicit OPTIONS handling (should be covered by cors, but being safe):
 app.options('*', cors());
 
+
+
+const clientBuildPath = path.join(__dirname, "./client/build");
+
+
+// Serve static React build
+app.use(express.static(clientBuildPath));
+
+// Serve React app for any route not handled by API (for React Router support)
+app.get('*', (req, res, next) => {
+  // If the request starts with an API or static asset path, skip to next handler
+  if (req.path.startsWith('/api') || req.path.startsWith('/get_') || req.path.startsWith('/update_') || req.path.startsWith('/upload_') || req.path.startsWith('/delete_') || req.path.startsWith('/roulette') || req.path.startsWith('/hls') || req.path.startsWith('/play') || req.path.startsWith('/public') || req.path.startsWith('/basic')) {
+    return next();
+  }
+  res.sendFile(path.join(clientBuildPath, 'index.html'));
+});
+
+
+// Protect all API endpoints with basic auth
+// Remove auth for /upload_movie/progress/:filename SSE endpoint
+app.use(["/get_movie_info", "/get_movies", "/get_movie_details", "/get_queue", "/update_queue", "/upload_movie", "/delete_movie", "/get_all_titles", "/roulette", "/api", smartSearchRouter], (req, res, next) => {
+  if (req.path.startsWith('/upload_movie/progress/')) return next();
+  return authMiddleware(req, res, next);
+});
 
 app.use("/", hlsRouter);
 app.use("/get_movie_info", get_movie_infoRouter);
@@ -122,3 +153,4 @@ async function startServer() {
 }
 
 startServer();
+

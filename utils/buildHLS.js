@@ -2,8 +2,41 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+const { spawnSync } = require('child_process');
 
-function buildHLS(src, outDir, progressCallback) {
+async function buildHLS(src, outDir, progressCallback) {
+  // Auto-detect English audio stream index using ffprobe
+  function getEnglishAudioIndex(file) {
+    try {
+      const ffprobe = spawnSync('ffprobe', [
+        '-v', 'error',
+        '-select_streams', 'a',
+        '-show_entries', 'stream=index:stream_tags=language:stream_tags=title:stream_tags=handler_name',
+        '-of', 'json',
+        file
+      ], { encoding: 'utf8' });
+      if (ffprobe.error) throw ffprobe.error;
+      const out = JSON.parse(ffprobe.stdout);
+      let idx = null;
+      if (out.streams && out.streams.length > 0) {
+        // 1. By language
+        idx = out.streams.find(s => (s.tags && s.tags.language && /^(eng|en)$/i.test(s.tags.language)));
+        if (idx) return idx.index;
+        // 2. By title
+        idx = out.streams.find(s => (s.tags && s.tags.title && /english|eng/i.test(s.tags.title)));
+        if (idx) return idx.index;
+        // 3. By handler_name
+        idx = out.streams.find(s => (s.tags && s.tags.handler_name && /english|eng/i.test(s.tags.handler_name)));
+        if (idx) return idx.index;
+        // 4. Fallback: first audio stream
+        return out.streams[0].index;
+      }
+    } catch (e) {
+      console.warn('[ffprobe] Could not auto-detect English audio:', e.message);
+    }
+    return 0;
+  }
+
   return new Promise((resolve, reject) => {
     const outM3U8 = path.join(outDir, "playlist.m3u8");
     const segmentPattern = path.join(outDir, "playlist%d.ts");
@@ -11,29 +44,36 @@ function buildHLS(src, outDir, progressCallback) {
     const fileExt = path.extname(src).toLowerCase();
     const isMKV = fileExt === '.mkv';
     const isAVI = fileExt === '.avi';
-    
-    // MKV and AVI files need re-encoding, others can try copy first
-    if (isMKV || isAVI) {
+    const isMP4 = fileExt === '.mp4';
+
+    // Always re-encode MKV, AVI, and MP4 files for HLS compatibility
+    if (isMKV || isAVI || isMP4) {
       console.log(`[ffmpeg] Detected ${fileExt} file, using robust re-encode for HLS compatibility`);
+      const audioIndex = getEnglishAudioIndex(src);
+      console.log(`[ffmpeg] Using audio stream index: ${audioIndex}`);
       const args = [
         "-i", src,
-        "-map", "0:v:0?",
-        "-map", "0:a:0?",
+        "-sn", // disable subtitle streams
+        "-map", "0:v:0",
+        "-map", `0:a:${audioIndex}`,
         "-c:v", "libx264",
         "-profile:v", "main",
         "-level", "3.1",
         "-pix_fmt", "yuv420p",
-        // Removed yadif filter for compatibility
         "-force_key_frames", "expr:gte(t,n_forced*2)",
-        "-preset", "fast",
-        "-crf", "21",
+        "-preset", "medium",
+        "-crf", "20",
         "-threads", "2",
         "-c:a", "aac",
-        "-b:a", "128k",
-        "-ar", "44100",
+        "-profile:a", "aac_low",
+        "-b:a", "320k",
+        "-ar", "48000",
         "-ac", "2",
         "-movflags", "+faststart",
-        "-max_muxing_queue_size", "4096",
+        "-max_muxing_queue_size", "9999",
+        "-ignore_unknown",
+        "-maxrate", "5M",
+        "-bufsize", "10M",
         "-f", "hls",
         "-hls_time", "8",
         "-hls_playlist_type", "vod",
@@ -43,11 +83,16 @@ function buildHLS(src, outDir, progressCallback) {
       ];
       return runFFmpeg(args, src, outM3U8, progressCallback).then(resolve).catch(reject);
     }
-    
-    // Try with copy codec first for other formats
+
+    // For other formats, try copy codec first, fallback to re-encode
     const tryWithCopyCodec = () => {
+      const audioIndex = getEnglishAudioIndex(src);
+      console.log(`[ffmpeg] Using audio stream index: ${audioIndex}`);
       const args = [
         "-i", src,
+        "-sn", // disable subtitle streams
+        "-map", "0:v:0",
+        "-map", `0:a:${audioIndex}`,
         "-c:v", "copy",
         "-c:a", "aac",
         "-b:a", "128k",
@@ -69,14 +114,18 @@ function buildHLS(src, outDir, progressCallback) {
     const tryWithReencode = () => {
       const args = [
         "-i", src,
+        "-c:a", "aac",
+        "-profile:a", "aac_low",
+        "-sn", // disable subtitle streams
         "-c:v", "libx264",
         "-c:a", "aac",
-        "-b:a", "128k",
-        "-preset", "ultrafast",
-        "-crf", "28",
+        "-b:a", "320k",
+        "-ar", "48000",
+        "-preset", "medium",
+        "-crf", "20",
         "-threads", "2",
-        "-bufsize", "1M",
-        "-maxrate", "2M",
+        "-bufsize", "10M",
+        "-maxrate", "5M",
         "-movflags", "+faststart",
         "-hls_time", "6",
         "-hls_playlist_type", "vod",
@@ -109,10 +158,11 @@ function runFFmpeg(args, src, outM3U8, progressCallback) {
 
     let duration = 0;
     let currentTime = 0;
+    let ffmpegStderr = '';
 
     ff.stderr.on('data', (data) => {
       const output = data.toString();
-      
+      ffmpegStderr += output;
       // Extract duration from ffmpeg output
       const durationMatch = output.match(/Duration: (\d{2}):(\d{2}):(\d{2})/);
       if (durationMatch && duration === 0) {
@@ -129,7 +179,6 @@ function runFFmpeg(args, src, outM3U8, progressCallback) {
         const minutes = parseInt(timeMatch[2]);
         const seconds = parseInt(timeMatch[3]);
         currentTime = hours * 3600 + minutes * 60 + seconds;
-        
         const progress = Math.min(100, (currentTime / duration) * 100);
         if (progressCallback) {
           progressCallback(progress);
@@ -138,7 +187,12 @@ function runFFmpeg(args, src, outM3U8, progressCallback) {
     });
 
     ff.on("close", code => {
-      code === 0 ? resolve() : reject(new Error("ffmpeg failed"));
+      if (code === 0) {
+        resolve();
+      } else {
+        console.error(`[ffmpeg] Full stderr for failed command: ${args.join(' ')}\n${ffmpegStderr}`);
+        reject(new Error("ffmpeg failed"));
+      }
     });
 
     ff.on("error", (err) => {

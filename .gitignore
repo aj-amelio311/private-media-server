@@ -18,7 +18,7 @@ data/
 
 # Environment variables
 .env
-
+client/.env
 # Misc
 *.swp
 *.swo

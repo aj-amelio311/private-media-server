@@ -31,33 +31,19 @@ async function backfillKeywords() {
   
   const db = getDatabase();
   
-  // Add keywords column if it doesn't exist
-  try {
-    const checkStmt = db.prepare("SELECT keywords FROM movies LIMIT 1");
-    checkStmt.step();
-    checkStmt.free();
-    console.log('Keywords column already exists\n');
-  } catch (err) {
-    console.log('Adding keywords column...');
-    db.run("ALTER TABLE movies ADD COLUMN keywords TEXT");
-    saveDatabase();
-    console.log('Keywords column added\n');
-  }
+  // Assume keywords column already exists
+  console.log('Assuming keywords column already exists.');
   
-  // Get all movies
-  const stmt = db.prepare('SELECT id, title, keywords FROM movies');
-  const movies = [];
+  // Get all movies missing keywords (NULL, empty string, or empty array)
+  const stmt = db.prepare("SELECT id, title FROM movies WHERE keywords IS NULL OR keywords = '' OR keywords = '[]'");
+  const moviesNeedingKeywords = [];
   while (stmt.step()) {
-    movies.push(stmt.getAsObject());
+    moviesNeedingKeywords.push(stmt.getAsObject());
   }
   stmt.free();
-  
-  console.log(`Found ${movies.length} total movies\n`);
-  
-  // Filter movies without keywords
-  const moviesNeedingKeywords = movies.filter(m => !m.keywords);
-  console.log(`${moviesNeedingKeywords.length} movies need keywords data\n`);
-  
+
+  console.log(`Found ${moviesNeedingKeywords.length} movies needing keywords data\n`);
+
   if (moviesNeedingKeywords.length === 0) {
     console.log('All movies already have keywords data!');
     return;
