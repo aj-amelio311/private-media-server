@@ -43,7 +43,7 @@ or more generally:
 ifconfig | grep 'inet ' | grep -v 127.0.0.1
 ```
 
-Note the local IP (e.g. `192.168.1.42`). Your Firestick should be on the same Wi‑Fi network.
+Note the local IP . Your Firestick should be on the same Wi‑Fi network.
 
 Step 2 — serve the app so the Firestick can reach it
 
