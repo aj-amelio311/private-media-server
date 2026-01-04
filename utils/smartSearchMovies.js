@@ -105,7 +105,7 @@ async function smartSearchMovies(query) {
   // Sort by descending finalScore
   results.sort((a, b) => b.finalScore - a.finalScore);
   // Return only the top x most relevant results
-  return results.slice(0, 15);
+  return results.slice(0, 25);
 }
 
 module.exports = { smartSearchMovies };
