@@ -28,3 +28,10 @@ client/.env
 
 # VSCode
 .vscode/
+
+# SSH keys
+eval "$(ssh-agent -s)"
+eval "$(ssh-agent -s)".pub
+*.pem
+*.pub
+
