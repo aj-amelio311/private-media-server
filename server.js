@@ -35,7 +35,7 @@ app.use(express.urlencoded({ limit: '10gb', extended: true }));
 
 // Dynamic CORS: allow localhost:3000 plus any origin in env ALLOWED_ORIGINS (comma-separated).
 const allowedFromEnv = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim()) : [];
-const defaultAllowed = ["http://localhost:8080", "http://127.0.0.1:8080", "http://192.168.88.4:8080"];
+const defaultAllowed = process.env.TAILSCALE_IP ? [process.env.TAILSCALE_IP] : [];
 const allowList = [...new Set([...defaultAllowed, ...allowedFromEnv])];
 
 app.use(cors({
