@@ -6,6 +6,7 @@ const { spawnSync } = require('child_process');
 
 async function buildHLS(src, outDir, progressCallback) {
   // Auto-detect English audio stream index using ffprobe
+  // Returns the RELATIVE audio stream index (0-based among audio streams only)
   function getEnglishAudioIndex(file) {
     try {
       const ffprobe = spawnSync('ffprobe', [
@@ -17,19 +18,19 @@ async function buildHLS(src, outDir, progressCallback) {
       ], { encoding: 'utf8' });
       if (ffprobe.error) throw ffprobe.error;
       const out = JSON.parse(ffprobe.stdout);
-      let idx = null;
       if (out.streams && out.streams.length > 0) {
+        // Find the relative index (position in the audio streams array)
         // 1. By language
-        idx = out.streams.find(s => (s.tags && s.tags.language && /^(eng|en)$/i.test(s.tags.language)));
-        if (idx) return idx.index;
+        let relativeIdx = out.streams.findIndex(s => (s.tags && s.tags.language && /^(eng|en)$/i.test(s.tags.language)));
+        if (relativeIdx !== -1) return relativeIdx;
         // 2. By title
-        idx = out.streams.find(s => (s.tags && s.tags.title && /english|eng/i.test(s.tags.title)));
-        if (idx) return idx.index;
+        relativeIdx = out.streams.findIndex(s => (s.tags && s.tags.title && /english|eng/i.test(s.tags.title)));
+        if (relativeIdx !== -1) return relativeIdx;
         // 3. By handler_name
-        idx = out.streams.find(s => (s.tags && s.tags.handler_name && /english|eng/i.test(s.tags.handler_name)));
-        if (idx) return idx.index;
-        // 4. Fallback: first audio stream
-        return out.streams[0].index;
+        relativeIdx = out.streams.findIndex(s => (s.tags && s.tags.handler_name && /english|eng/i.test(s.tags.handler_name)));
+        if (relativeIdx !== -1) return relativeIdx;
+        // 4. Fallback: first audio stream (relative index 0)
+        return 0;
       }
     } catch (e) {
       console.warn('[ffprobe] Could not auto-detect English audio:', e.message);
