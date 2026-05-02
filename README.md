@@ -1,7 +1,7 @@
 Streaming App — Firestick / Fire TV Guide
 =========================================
 
-![UI Screenshot](UI_screenshot.png)
+![UI Screenshot](UI_screenshot2.png)
 
 Overview
 --------
