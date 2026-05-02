@@ -102,13 +102,34 @@ const BASE_DIR = process.env.MOVIES_DIR || "/Volumes/External/Streaming/movies/"
 // Serve the simple test page
 app.use(express.static("public", {
   setHeaders: (res, p) => {
-    if (p.endsWith(".m3u8")) res.setHeader("Content-Type","application/vnd.apple.mpegurl");
-    if (p.endsWith(".ts"))   res.setHeader("Content-Type","video/mp2t");
+    if (p.endsWith(".m3u8")) {
+      res.setHeader("Content-Type","application/vnd.apple.mpegurl");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("Keep-Alive", "timeout=300, max=100");
+    }
+    if (p.endsWith(".ts")) {
+      res.setHeader("Content-Type","video/mp2t");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("Keep-Alive", "timeout=300, max=100");
+    }
   }
 }));
 
 
-app.use('/hls', express.static(BASE_DIR));
+app.use('/hls', express.static(BASE_DIR, {
+  setHeaders: (res, p) => {
+    if (p.endsWith(".m3u8")) {
+      res.setHeader("Content-Type","application/vnd.apple.mpegurl");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("Keep-Alive", "timeout=300, max=100");
+    }
+    if (p.endsWith(".ts")) {
+      res.setHeader("Content-Type","video/mp2t");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("Keep-Alive", "timeout=300, max=100");
+    }
+  }
+}));
 
 app.get("/basic", (req, res) => {
   res.send("Hello, world!");
@@ -142,10 +163,10 @@ async function startServer() {
       console.log("API listening on 8080");
     });
 
-    // Increase server timeout to 30 minutes for large uploads
-    server.timeout = 1800000;
-    server.keepAliveTimeout = 1800000;
-    server.headersTimeout = 1810000;
+    // Increase server timeout to 4 hours for large uploads and long-running streams
+    server.timeout = 14400000;
+    server.keepAliveTimeout = 14400000;
+    server.headersTimeout = 14400000;
   } catch (err) {
     console.error('[Server] Failed to start:', err);
     process.exit(1);
